@@ -85,7 +85,7 @@ void options_print_help(void)
 "  -W, --wall-width=INT    wall thickness in characters (default 1)\n"
 "  -C, --corridor=INT      corridor width in characters (default 1)\n"
 "      --size=WxH          fixed maze size in cells\n"
-"  -m, --message=STR       show a message in a box, like cbonsai\n"
+"  -m, --message=STR       show a message below the maze, like cbonsai\n"
 "  -e, --endpoints         mark an entrance and exit\n"
 "\n"
 "tweaks\n"

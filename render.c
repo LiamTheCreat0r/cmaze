@@ -233,9 +233,12 @@ void render_screen(const Maze *m, const Options *o, const Render *R,
         return;
     canvas_build(&cv, m, R);
 
+    /* The bottom band belongs to the message box; never draw into it. */
+    int lim = L->tr - L->msg_h;
+
     for (y = 0; y < cv.h; y++) {
         int sy = L->oy + y;
-        if (sy >= L->tr)
+        if (sy >= lim)
             break;
         if (sy < 0)
             continue;
@@ -260,23 +263,13 @@ void render_screen(const Maze *m, const Options *o, const Render *R,
  * ------------------------------------------------------------------ */
 
 #define MAX_MSG_LINES 12
+#define MSG_MAX_W     40     /* longest wrapped line inside the box      */
 
-static void draw_str(int y, int x, const wchar_t *s, int n, int maxw,
-                     short pair, int use_color)
-{
-    int i;
-
-    if (y < 0 || y >= LINES)
-        return;
-    for (i = 0; i < n && s[i] != L'\0'; i++) {
-        int sx = x + i;
-        if (sx < 0 || sx >= COLS)
-            continue;
-        if (i >= maxw)
-            break;
-        put_cell(y, sx, s[i], pair, use_color);
-    }
-}
+typedef struct {
+    wchar_t buf[512];
+    int     starts[MAX_MSG_LINES], lens[MAX_MSG_LINES];
+    int     nlines, w, h;
+} Msg;
 
 static int wrap_text(const wchar_t *s, int width, int *starts, int *lens)
 {
@@ -319,56 +312,113 @@ static int wrap_text(const wchar_t *s, int width, int *starts, int *lens)
     return n;
 }
 
+/* Convert and wrap the message so it fits `avail` columns.  Returns 0
+ * when there is nothing to draw (no message, or no room at all).       */
+static int msg_prepare(const Options *o, int avail, Msg *mb)
+{
+    int width, i;
+
+    memset(mb, 0, sizeof *mb);
+    if (!o->message || !*o->message)
+        return 0;
+
+    if (mbstowcs(mb->buf, o->message,
+                 sizeof mb->buf / sizeof mb->buf[0] - 1) == (size_t)-1) {
+        size_t k;
+        for (k = 0; k + 1 < sizeof mb->buf / sizeof mb->buf[0]
+                  && o->message[k]; k++)
+            mb->buf[k] = (unsigned char)o->message[k];
+        mb->buf[k] = L'\0';
+    }
+    if (mb->buf[0] == L'\0')
+        return 0;
+
+    width = avail - 4;                      /* one-column margin each side */
+    if (width > MSG_MAX_W)
+        width = MSG_MAX_W;
+    if (width < 1)
+        return 0;
+
+    mb->nlines = wrap_text(mb->buf, width, mb->starts, mb->lens);
+    mb->h = mb->nlines + 2;
+    mb->w = width + 2;
+    for (i = 0; i < mb->nlines; i++)
+        if (mb->lens[i] + 2 > mb->w)
+            mb->w = mb->lens[i] + 2;
+    if (mb->w > avail)
+        mb->w = avail;
+    if (mb->w < 3)
+        return 0;
+    return 1;
+}
+
+int message_box_geom(const Options *o, int tr, int tc,
+                     int *y, int *x, int *w, int *h)
+{
+    Msg mb;
+
+    if (!msg_prepare(o, tc, &mb)) {
+        *y = *x = *w = *h = 0;
+        return 0;
+    }
+    *w = mb.w;
+    *h = mb.h;
+    *y = tr - mb.h;                         /* own band at the bottom */
+    if (*y < 0)
+        *y = 0;
+    *x = (tc - mb.w) / 2;
+    if (*x < 0)
+        *x = 0;
+    return 1;
+}
+
+static void msg_chars(int style, wchar_t *horiz, wchar_t *vert,
+                      wchar_t *tl, wchar_t *tr, wchar_t *bl, wchar_t *br)
+{
+    if (style == STYLE_ASCII) {
+        *horiz = L'-'; *vert = L'|';
+        *tl = *tr = *bl = *br = L'+';
+    } else {
+        *horiz = L'\u2500'; *vert = L'\u2502';
+        *tl = L'\u250C'; *tr = L'\u2510';
+        *bl = L'\u2514'; *br = L'\u2518';
+    }
+}
+
+static void draw_str(int y, int x, const wchar_t *s, int n, int maxw,
+                     short pair, int use_color)
+{
+    int i;
+
+    if (y < 0 || y >= LINES)
+        return;
+    for (i = 0; i < n && s[i] != L'\0'; i++) {
+        int sx = x + i;
+        if (sx < 0 || sx >= COLS)
+            continue;
+        if (i >= maxw)
+            break;
+        put_cell(y, sx, s[i], pair, use_color);
+    }
+}
+
 void render_message(const Options *o, const Render *R, const Layout *L)
 {
-    wchar_t buf[512];
+    Msg mb;
     wchar_t horiz, vert, tl, tr, bl, br, space = L' ';
-    int starts[MAX_MSG_LINES], lens[MAX_MSG_LINES];
-    int nlines, width, boxh, boxw, y, x, i, j;
+    int i, j;
     short border = R->use_color ? R->pair[CR_HEAD] : 0;
     short text   = R->use_color ? R->pair[CR_ENDPOINT] : 0;
 
-    if (!o->message || !*o->message)
+    if (L->msg_h <= 0)
+        return;
+    if (!msg_prepare(o, L->tc, &mb))
         return;
 
-    if (mbstowcs(buf, o->message, sizeof buf / sizeof buf[0] - 1) == (size_t)-1) {
-        size_t k;
-        for (k = 0; k + 1 < sizeof buf / sizeof buf[0] && o->message[k]; k++)
-            buf[k] = (unsigned char)o->message[k];
-        buf[k] = L'\0';
-    }
-    if (buf[0] == L'\0')
-        return;
+    msg_chars(R->style, &horiz, &vert, &tl, &tr, &bl, &br);
 
-    if (R->style == STYLE_ASCII) {
-        horiz = L'-'; vert = L'|';
-        tl = tr = bl = br = L'+';
-    } else {
-        horiz = L'\u2500'; vert = L'\u2502';
-        tl = L'\u250C'; tr = L'\u2510'; bl = L'\u2514'; br = L'\u2518';
-    }
-
-    width = L->tc - 4;
-    if (width > 40)
-        width = 40;
-    if (width < 1)
-        return;
-
-    nlines = wrap_text(buf, width, starts, lens);
-    boxh = nlines + 2;
-    boxw = width + 2;
-    for (i = 0; i < nlines; i++)
-        if (lens[i] + 2 > boxw)
-            boxw = lens[i] + 2;
-    if (boxw > L->tc)
-        boxw = L->tc;
-    if (boxw < 3)
-        return;
-
-    y = L->tr - boxh;
-    if (y < 0)
-        y = 0;
-    x = 0;
+    int y = L->msg_y, x = L->msg_x;
+    int boxw = L->msg_w, boxh = L->msg_h;
 
     put_cell(y, x, tl, border, R->use_color);
     for (i = 1; i < boxw - 1; i++)
@@ -387,8 +437,8 @@ void render_message(const Options *o, const Render *R, const Layout *L)
         put_cell(y + boxh - 1, x + i, horiz, border, R->use_color);
     put_cell(y + boxh - 1, x + boxw - 1, br, border, R->use_color);
 
-    for (i = 0; i < nlines; i++)
-        draw_str(y + 1 + i, x + 1, buf + starts[i], lens[i],
+    for (i = 0; i < mb.nlines && 1 + i < boxh - 1; i++)
+        draw_str(y + 1 + i, x + 1, mb.buf + mb.starts[i], mb.lens[i],
                  boxw - 2, text, R->use_color);
 }
 
@@ -440,6 +490,37 @@ void render_print(const Maze *m, const Options *o, FILE *fp)
             fput_wc(cv.ch[(size_t)y * cv.w + x], fp);
         fputc('\n', fp);
     }
+
+    /* Same message box the curses view shows, below the maze. */
+    {
+        Msg mb;
+        wchar_t horiz, vert, tl, ctr, bl, br;
+        int i, j;
+
+        if (msg_prepare(o, cv.w, &mb)) {
+            msg_chars(o->style, &horiz, &vert, &tl, &ctr, &bl, &br);
+            fputc('\n', fp);
+
+            for (j = 0; j < mb.h; j++) {
+                for (i = 0; i < mb.w; i++) {
+                    wchar_t ch = L' ';
+                    if (j == 0)
+                        ch = (i == 0) ? tl
+                           : (i == mb.w - 1) ? ctr : horiz;
+                    else if (j == mb.h - 1)
+                        ch = (i == 0) ? bl
+                           : (i == mb.w - 1) ? br : horiz;
+                    else if (i == 0 || i == mb.w - 1)
+                        ch = vert;
+                    else if (i - 1 < mb.lens[j - 1])
+                        ch = mb.buf[mb.starts[j - 1] + (i - 1)];
+                    fput_wc(ch, fp);
+                }
+                fputc('\n', fp);
+            }
+        }
+    }
+
     canvas_free(&cv);
 }
 
@@ -451,7 +532,14 @@ void layout_autosize(const Options *o, int tr, int tc, int *rows, int *cols)
 {
     int ww = o->wall_width;
     int cc = o->corridor;
-    int r, c;
+    int y, x, w, h, r, c;
+
+    /* Leave room for the message box so the whole output fits. */
+    if (message_box_geom(o, tr, tc, &y, &x, &w, &h)) {
+        tr -= h;
+        if (tr < 1)
+            tr = 1;
+    }
 
     c = (o->size_w > 0) ? o->size_w : (tc - ww) / (cc + ww);
     r = (o->size_h > 0) ? o->size_h : (tr - ww) / (cc + ww);
@@ -468,6 +556,7 @@ void layout_place(int rows, int cols, const Options *o, int tr, int tc,
 {
     int ww = o->wall_width;
     int cc = o->corridor;
+    int band = 0;
 
     L->rows = rows;
     L->cols = cols;
@@ -476,8 +565,22 @@ void layout_place(int rows, int cols, const Options *o, int tr, int tc,
     L->cw   = cols * cc + (cols + 1) * ww;
     L->ch   = rows * cc + (rows + 1) * ww;
 
+    /* Reserve a band at the bottom for the message, so the maze and the
+     * message never cover each other. */
+    if (message_box_geom(o, tr, tc, &L->msg_y, &L->msg_x,
+                         &L->msg_w, &L->msg_h)) {
+        band = L->msg_h;
+        if (band > tr) {                /* box taller than the screen */
+            band = (tr > 0) ? tr : 0;
+            L->msg_y = 0;
+            L->msg_h = band;
+        }
+    } else {
+        L->msg_y = L->msg_x = L->msg_w = L->msg_h = 0;
+    }
+
     L->ox = (tc - L->cw) / 2;
-    L->oy = (tr - L->ch) / 2;
+    L->oy = ((tr - band) - L->ch) / 2;
     if (L->ox < 0) L->ox = 0;
     if (L->oy < 0) L->oy = 0;
 }

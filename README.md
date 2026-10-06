@@ -25,7 +25,7 @@ one to a file.
 - **Box-drawing or ASCII output** — Unicode connectivity glyphs, block walls, or plain `#`
 - **Braiding** — remove dead ends for a loopy maze
 - **Endpoints** — carve an entrance and exit
-- **Messages** — a framed message box, like cbonsai
+- **Messages** — a framed message below the maze, like cbonsai
 - **Deterministic seeds** — the same seed always draws the same maze
 - **Save / load** — persist a seed plus its settings to a file
 - **Resize-safe** — handles `SIGWINCH`; the maze re-lays out to the new size
@@ -70,7 +70,7 @@ appearance
   -W, --wall-width=INT    wall thickness in characters (default 1)
   -C, --corridor=INT      corridor width in characters (default 1)
       --size=WxH          fixed maze size in cells
-  -m, --message=STR       show a message in a box, like cbonsai
+  -m, --message=STR       show a message below the maze, like cbonsai
   -e, --endpoints         mark an entrance and exit
 
 tweaks

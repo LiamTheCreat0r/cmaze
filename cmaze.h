@@ -206,12 +206,21 @@ typedef struct Layout {
     int cw, ch;         /* rendered size in characters                   */
     int oy, ox;         /* top-left corner of the maze on screen         */
     int tr, tc;         /* terminal size used for centring               */
+    int msg_y, msg_x;   /* message box position, 0 size when there is none */
+    int msg_w, msg_h;
 } Layout;
+
+/* Geometry of the -m message box on a tr x tc screen.  Returns 1 and fills
+ * the outputs when a box will be drawn, 0 when there is no message.      */
+int  message_box_geom(const Options *o, int tr, int tc,
+                      int *y, int *x, int *w, int *h);
 
 /* Derive cell dimensions from a terminal size (or honour --size). */
 void layout_autosize(const Options *o, int tr, int tc, int *rows, int *cols);
 /* Place a rows x cols maze on a tr x tc screen; the origin is clamped so
- * an oversized maze is simply clipped.                                   */
+ * an oversized maze is simply clipped.  When a message box is configured
+ * a band of that height is reserved at the bottom and the maze is centred
+ * in what is left, so the two never overlap.                              */
 void layout_place(int rows, int cols, const Options *o, int tr, int tc,
                   Layout *L);
 

@@ -390,10 +390,17 @@ static int run_curses(Options *o)
         }
 
         if (!o->infinite) {
-            ui_pause(&u, -1.0);
+            if (ui_pause(&u, -1.0)) {      /* the user asked to quit */
+                u.m = NULL;
+                gen_free(&g);
+                break;
+            }
+            /* Terminal changed shape: rebuild at the new size instead
+             * of falling through and exiting.  Keep the seed so the
+             * maze only changes shape, not identity. */
             u.m = NULL;
             gen_free(&g);
-            break;
+            continue;
         }
 
         if (ui_pause(&u, o->wait)) {
