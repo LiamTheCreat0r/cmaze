@@ -245,6 +245,7 @@ int style_parse(const char *name)
     normalize(name, norm, sizeof norm);
 
     if (strcmp(norm, "auto") == 0)    return STYLE_AUTO;
+    if (strcmp(norm, "texture") == 0) return STYLE_TEXTURE;
     if (strcmp(norm, "ascii") == 0)   return STYLE_ASCII;
     if (strcmp(norm, "unicode") == 0) return STYLE_UNICODE;
     if (strcmp(norm, "utf8") == 0)    return STYLE_UNICODE;

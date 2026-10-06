@@ -2,27 +2,32 @@
 
 A terminal maze generator in C + ncurses, meant to be watched rather than played.
 Carve a maze one cell at a time, in color, at whatever speed you like — or print
-one to a file.
+one to a file. Walls default to a seeded ASCII texture:
 
 ```
-┌───┬─────┬─────┐
-│   │     │     │
-│ │ │ ┌─┐ │ ┌── │
-│ │ │ │ │   │   │
-│ │ │ │ └───┤ │ │
-│ │ │ │     │ │ │
-│ └─┘ └──── │ │ │
-│           │ │ │
-└───────────┴─┴─┘
++-::~-::::::-::----_-:=:-.--%
+: :         :   :           '
+' ' x.__# % %=% ' x~__-_=~% :
+: :   :   :   : : :   ' :   '
+! #.# ! x==_# % ! x # @ ! x_|
+|   | | |   |   |   |   |   !
+' x ' ' % # %._.% #~__-=.~# :
+| | | |   |   |   |   !   | !
+! #_# x_...=% % #=! x * x x |
+|           |     | |   |   !
+#____=_..____._====~..:._:_=+
 ```
 
 ## Features
 
 - **11 maze algorithms**, plus `random` to pick one per maze
+- **Textured walls (default)** — walls composed of seeded ASCII symbols,
+  grouped by stroke direction, so the maze reads clearly but looks hand-typed
+- **Three more wall styles** — plain ASCII, Unicode box-drawing, or solid blocks
+  (`--style=ascii|unicode|block`)
 - **Live mode** — watch the maze carve itself, cell by cell
 - **Infinite / screensaver mode** — endless mazes, the screensaver quits on any key
 - **Themes and custom colors** — `default`, `forest`, `ocean`, `amber`, `mono`, or your own palette
-- **Box-drawing or ASCII output** — Unicode connectivity glyphs, block walls, or plain `#`
 - **Braiding** — remove dead ends for a loopy maze
 - **Endpoints** — carve an entrance and exit
 - **Messages** — a framed message below the maze, like cbonsai
@@ -64,7 +69,7 @@ timing
 
 appearance
   -T, --type=TYPE         maze algorithm (default backtracker)
-      --style=STYLE       ascii, unicode or block (default auto)
+      --style=STYLE       texture, ascii, unicode or block (default texture)
       --theme=THEME       default, forest, ocean, amber or mono
   -c, --colors=LIST       comma list: wall,path,head,trail1,trail2,unvisited,endpoint
   -W, --wall-width=INT    wall thickness in characters (default 1)
@@ -120,6 +125,23 @@ cmaze -l -s 42 -b 40 -e -m "hello" # seeded, braided, with endpoints + message
 | `binary-tree` | fastest, strong northeast bias |
 | `hunt-and-kill` | walk until stuck, then hunt for unvisited cells |
 | `random` | pick a different algorithm each maze |
+
+## Wall styles
+
+| Style | Look |
+| --- | --- |
+| `texture` (default) | random ASCII symbols per wall cell, chosen from a hash of position + seed; horizontal runs use `-=~_:.`, vertical runs use `|!:'`, corners and tees use `+#*x@%`, crossings use `+#x*` |
+| `ascii` | plain `\|`, `-`, `+` |
+| `unicode` | box-drawing strokes `─│┌┐└┘├┤┬┴┼` |
+| `block` | solid `█` walls |
+
+```sh
+cmaze -p --style=unicode    # the classic box-drawing maze
+cmaze -l --style=block      # chunky block walls
+```
+
+The texture is deterministic: the same `--seed` always produces the same
+glyphs, and each maze in infinite mode gets its own texture.
 
 ## Colors
 

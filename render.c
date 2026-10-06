@@ -125,6 +125,45 @@ static int cv_wall(const Canvas *cv, int x, int y)
     return cv->role[(size_t)y * (size_t)cv->w + (size_t)x] == CR_WALL;
 }
 
+/* ------------------------------------------------------------------ *
+ * Wall texture: seeded ASCII glyphs, grouped by stroke direction so
+ * the maze keeps its shape while the walls look hand-typed.
+ * ------------------------------------------------------------------ */
+
+static const char TEX_HORZ[]  = "-=~_:.";   /* E-W runs  */
+static const char TEX_VERT[]  = "|!:'";     /* N-S runs  */
+static const char TEX_JOINT[] = "+#*x@%";   /* corners, tees, caps */
+static const char TEX_CROSS[] = "+#x*";     /* NSEW crossing */
+
+static unsigned tex_hash(unsigned x, unsigned y, unsigned seed)
+{
+    unsigned h = seed ^ 0x9e3779b9u;
+
+    h ^= x * 0x85ebca6bu;
+    h = (h << 13) | (h >> 19);
+    h ^= y * 0xc2b2ae35u;
+    h = (h << 13) | (h >> 19);
+    h ^= h >> 16;
+    return h;
+}
+
+static wchar_t tex_char(const Render *R, int bits, int x, int y)
+{
+    int ew = (bits & 10) == 10;    /* walls to the east and west */
+    int ns = (bits & 5) == 5;      /* walls to the north and south */
+    const char *set;
+    size_t n, i;
+
+    if (ew && !ns)      set = TEX_HORZ;
+    else if (ns && !ew) set = TEX_VERT;
+    else if (ew && ns)  set = TEX_CROSS;
+    else                set = TEX_JOINT;
+
+    n = strlen(set);
+    i = n ? tex_hash((unsigned)x, (unsigned)y, R->tex_seed) % n : 0;
+    return (wchar_t)(unsigned char)set[i];
+}
+
 static wchar_t wall_char(const Canvas *cv, const Render *R, int x, int y)
 {
     int bits;
@@ -135,12 +174,16 @@ static wchar_t wall_char(const Canvas *cv, const Render *R, int x, int y)
     /* Walls thicker than one character read better as a solid mass;
      * strokes only make sense on a single line. */
     if (R->wall_width > 1)
-        return (R->style == STYLE_ASCII) ? L'#' : L'\u2588';
+        return (R->style == STYLE_ASCII || R->style == STYLE_TEXTURE)
+             ? L'#' : L'\u2588';
 
     bits = (cv_wall(cv, x, y - 1) ? 1 : 0)
          | (cv_wall(cv, x + 1, y) ? 2 : 0)
          | (cv_wall(cv, x, y + 1) ? 4 : 0)
          | (cv_wall(cv, x - 1, y) ? 8 : 0);
+
+    if (R->style == STYLE_TEXTURE)
+        return tex_char(R, bits, x, y);
 
     if (R->style == STYLE_ASCII) {
         switch (bits) {
@@ -156,7 +199,8 @@ static void canvas_build(Canvas *cv, const Maze *m, const Render *R)
 {
     int ww = R->wall_width;
     int cc = R->corridor;
-    wchar_t fill = (R->style == STYLE_ASCII) ? L'#' : L'\u2588';
+    wchar_t fill = (R->style == STYLE_ASCII || R->style == STYLE_TEXTURE)
+                 ? L'#' : L'\u2588';
     int r, c, i, n;
 
     n = cv->w * cv->h;
@@ -216,6 +260,8 @@ static void put_cell(int y, int x, wchar_t ch, short pair, int use_color)
     wchar_t tmp[2];
     cchar_t cc;
 
+    if (y < 0 || y >= LINES || x < 0 || x >= COLS)
+        return;
     tmp[0] = ch;
     tmp[1] = L'\0';
     if (setcchar(&cc, tmp, A_NORMAL, use_color ? pair : 0, NULL) == OK)
@@ -233,8 +279,15 @@ void render_screen(const Maze *m, const Options *o, const Render *R,
         return;
     canvas_build(&cv, m, R);
 
-    /* The bottom band belongs to the message box; never draw into it. */
+    /* The bottom band belongs to the message box; never draw into it.
+     * Clip against both the layout and the *actual* screen, so a stale
+     * layout after a resize can never write past the edge and make the
+     * terminal wrap lines. */
+    int scr_h, scr_w;
+    getmaxyx(stdscr, scr_h, scr_w);
     int lim = L->tr - L->msg_h;
+    if (lim > scr_h)
+        lim = scr_h;
 
     for (y = 0; y < cv.h; y++) {
         int sy = L->oy + y;
@@ -246,7 +299,7 @@ void render_screen(const Maze *m, const Options *o, const Render *R,
             int sx = L->ox + x;
             size_t idx;
 
-            if (sx >= L->tc)
+            if (sx >= L->tc || sx >= scr_w)
                 break;
             if (sx < 0)
                 continue;
@@ -375,7 +428,7 @@ int message_box_geom(const Options *o, int tr, int tc,
 static void msg_chars(int style, wchar_t *horiz, wchar_t *vert,
                       wchar_t *tl, wchar_t *tr, wchar_t *bl, wchar_t *br)
 {
-    if (style == STYLE_ASCII) {
+    if (style == STYLE_ASCII || style == STYLE_TEXTURE) {
         *horiz = L'-'; *vert = L'|';
         *tl = *tr = *bl = *br = L'+';
     } else {
@@ -478,6 +531,7 @@ void render_print(const Maze *m, const Options *o, FILE *fp)
     R.wall_width = o->wall_width;
     R.corridor   = o->corridor;
     R.use_color  = 0;
+    R.tex_seed   = (unsigned int)o->seed;
 
     if (!canvas_alloc(&cv,
                       m->cols * o->corridor + (m->cols + 1) * o->wall_width,

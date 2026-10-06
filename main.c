@@ -120,7 +120,7 @@ static void gen_finish(Gen *g, const Options *o, Rng *rng)
  * Non-curses mode: cmaze -p
  * ------------------------------------------------------------------ */
 
-static int run_print(const Options *o)
+static int run_print(Options *o)
 {
     Layout L;
     Rng rng;
@@ -134,6 +134,7 @@ static int run_print(const Options *o)
     layout_place(rows, cols, o, tr, tc, &L);
 
     seed = o->seed_set ? o->seed : default_seed();
+    o->seed = seed;                 /* the texture is hashed from this */
     rng_seed(&rng, seed);
 
     if (gen_start(&g, o, &L, &rng) != 0) {
@@ -200,6 +201,8 @@ static void ui_winch(Ui *u)
         ws.ws_row > 0 && ws.ws_col > 0) {
         tr = ws.ws_row;
         tc = ws.ws_col;
+    } else {
+        getmaxyx(stdscr, tr, tc);   /* never resizeterm(0, 0) */
     }
     resizeterm(tr, tc);
     getmaxyx(stdscr, tr, tc);
@@ -289,6 +292,19 @@ static int run_curses(Options *o)
     keypad(stdscr, TRUE);
     curs_set(0);
     leaveok(stdscr, TRUE);
+    scrollok(stdscr, FALSE);        /* drawing must never scroll the screen */
+
+    /* If ncurses sized the screen from terminfo and it disagrees with
+     * the real terminal, lines get wrapped by the physical terminal and
+     * everything looks shifted.  Trust the ioctl. */
+    {
+        int ar, ac, ir, ic;
+
+        getmaxyx(stdscr, ar, ac);
+        term_size(&ir, &ic);
+        if (ar != ir || ac != ic)
+            resizeterm(ir, ic);
+    }
 
     render_setup(&R, o);
 
@@ -320,6 +336,7 @@ static int run_curses(Options *o)
 
         seed = base + maze_no;
         rng_seed(&rng, seed);
+        R.tex_seed = (unsigned int)seed;    /* wall texture varies per maze */
 
         u.L = &L;
         u.m = NULL;
@@ -443,10 +460,10 @@ int main(int argc, char **argv)
 
     utf8 = cmaze_locale();
     if (o.style == STYLE_AUTO)
-        o.style = utf8 ? STYLE_UNICODE : STYLE_ASCII;
-    if (!utf8 && o.style != STYLE_ASCII) {
-        fprintf(stderr, "cmaze: no UTF-8 locale, falling back to ascii walls\n");
-        o.style = STYLE_ASCII;
+        o.style = STYLE_TEXTURE;
+    if (!utf8 && (o.style == STYLE_UNICODE || o.style == STYLE_BLOCK)) {
+        fprintf(stderr, "cmaze: no UTF-8 locale, falling back to texture walls\n");
+        o.style = STYLE_TEXTURE;
     }
 
     if (o.print)

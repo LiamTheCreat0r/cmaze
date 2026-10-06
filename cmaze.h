@@ -181,12 +181,13 @@ enum {
 #define CMAZE_COLOR_ROLES \
     "wall,path,head,trail1,trail2,unvisited,endpoint"
 
-enum { STYLE_AUTO = 0, STYLE_ASCII, STYLE_UNICODE, STYLE_BLOCK };
+enum { STYLE_AUTO = 0, STYLE_TEXTURE, STYLE_ASCII, STYLE_UNICODE, STYLE_BLOCK };
 
 typedef struct Render {
     int   style;                  /* resolved STYLE_*                        */
     int   wall_width, corridor;
     int   use_color;
+    unsigned int tex_seed;        /* per-maze seed for the wall texture      */
     short pair[CR_COUNT];         /* ncurses colour pair, 0 when disabled    */
     short col[CR_COUNT];          /* resolved colour numbers                 */
 } Render;

@@ -79,7 +79,7 @@ void options_print_help(void)
 "\n"
 "appearance\n"
 "  -T, --type=TYPE         maze algorithm (default backtracker)\n"
-"      --style=STYLE       ascii, unicode or block (default auto)\n"
+"      --style=STYLE       texture, ascii, unicode or block (default texture)\n"
 "      --theme=THEME       default, forest, ocean, amber or mono\n"
 "  -c, --colors=LIST       comma list: " CMAZE_COLOR_ROLES "\n"
 "  -W, --wall-width=INT    wall thickness in characters (default 1)\n"
@@ -217,7 +217,7 @@ int options_parse(Options *o, int argc, char **argv)
 
         case OPT_STYLE:
             if (style_parse(optarg) < 0)
-                return bad("unknown style: %s (try ascii, unicode, block)",
+                return bad("unknown style: %s (try texture, ascii, unicode, block)",
                            optarg);
             o->style_arg = optarg;
             o->explicit_mask |= X_STYLE;
