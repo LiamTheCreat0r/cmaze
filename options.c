@@ -10,7 +10,8 @@ enum {
     OPT_STYLE = 1000,
     OPT_THEME,
     OPT_SIZE,
-    OPT_STRATEGY
+    OPT_STRATEGY,
+    OPT_FILL
 };
 
 static const struct option longopts[] = {
@@ -36,6 +37,7 @@ static const struct option longopts[] = {
     { "theme",       required_argument, 0, OPT_THEME },
     { "size",        required_argument, 0, OPT_SIZE },
     { "strategy",    required_argument, 0, OPT_STRATEGY },
+    { "fill",        required_argument, 0, OPT_FILL },
     { 0, 0, 0, 0 }
 };
 
@@ -48,7 +50,8 @@ void options_defaults(Options *o)
     o->strategy     = "mix";
     o->theme        = "default";
     o->wall_width   = 1;
-    o->corridor     = 1;
+    o->corridor     = 2;
+    o->fill         = 67;
     o->size_w       = -1;
     o->size_h       = -1;
     o->style        = STYLE_AUTO;
@@ -83,7 +86,8 @@ void options_print_help(void)
 "      --theme=THEME       default, forest, ocean, amber or mono\n"
 "  -c, --colors=LIST       comma list: " CMAZE_COLOR_ROLES "\n"
 "  -W, --wall-width=INT    wall thickness in characters (default 1)\n"
-"  -C, --corridor=INT      corridor width in characters (default 1)\n"
+"  -C, --corridor=INT      corridor width in characters (default 2)\n"
+"      --fill=PCT          share of the terminal the maze may use (default 67)\n"
 "      --size=WxH          fixed maze size in cells\n"
 "  -m, --message=STR       show a message below the maze, like cbonsai\n"
 "  -e, --endpoints         mark an entrance and exit\n"
@@ -250,7 +254,15 @@ int options_parse(Options *o, int argc, char **argv)
             o->explicit_mask |= X_STRAT;
             break;
 
-        case '?':
+        case OPT_FILL: {
+            long v;
+            if (parse_int("fill", optarg, &v)) return -1;
+            if (v < 1 || v > 100) return bad("fill must be 1-100: %s", optarg);
+            o->fill = (int)v;
+            o->explicit_mask |= X_FILL;
+            break;
+        }
+
         default:
             if (optopt)
                 fprintf(stderr, "cmaze: invalid option -- '%c'\n", optopt);
@@ -332,6 +344,11 @@ static void load_kv(Options *o, const char *key, const char *val)
             long v = strtol(val, NULL, 0);
             if (v >= 1) o->corridor = (int)v;
         }
+    } else if (!strcmp(key, "fill")) {
+        if (!(ex & X_FILL)) {
+            long v = strtol(val, NULL, 0);
+            if (v >= 1 && v <= 100) o->fill = (int)v;
+        }
     } else if (!strcmp(key, "braid")) {
         if (!(ex & X_BRAID)) {
             long v = strtol(val, NULL, 0);
@@ -398,6 +415,7 @@ int options_save(const Options *o, const char *path, unsigned long long seed)
     fprintf(fp, "theme=%s\n", o->theme ? o->theme : "default");
     fprintf(fp, "wall-width=%d\n", o->wall_width);
     fprintf(fp, "corridor=%d\n", o->corridor);
+    fprintf(fp, "fill=%d\n", o->fill);
     fprintf(fp, "braid=%d\n", o->braid);
     fprintf(fp, "strategy=%s\n", o->strategy ? o->strategy : "mix");
     fprintf(fp, "size=%dx%d\n", o->size_w > 0 ? o->size_w : 0,

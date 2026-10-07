@@ -29,6 +29,7 @@ The user launches `cmaze` and a maze appears in the terminal. In live mode (`-l`
 | `-c LIST` | `--colors=LIST` | Custom color list (walls, paths, generator head, etc.) |
 | `-W INT` | `--wall-width=INT` | Wall thickness / cell size in characters |
 | `-C INT` | `--corridor=INT` | Corridor width |
+| `--fill=PCT` | `--fill=PCT` | Share of the terminal the maze fills (default 67) |
 | `-b INT` | `--braid=INT` | Percentage of dead ends removed, to create loops |
 | `-e` | `--endpoints` | Mark an entrance and exit (purely decorative) |
 | `-p` | `--print` | Print the final maze to stdout and exit (no ncurses session) |

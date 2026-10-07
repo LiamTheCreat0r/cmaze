@@ -586,7 +586,7 @@ void layout_autosize(const Options *o, int tr, int tc, int *rows, int *cols)
 {
     int ww = o->wall_width;
     int cc = o->corridor;
-    int y, x, w, h, r, c;
+    int y, x, w, h, r, c, fill;
 
     /* Leave room for the message box so the whole output fits. */
     if (message_box_geom(o, tr, tc, &y, &x, &w, &h)) {
@@ -594,6 +594,17 @@ void layout_autosize(const Options *o, int tr, int tc, int *rows, int *cols)
         if (tr < 1)
             tr = 1;
     }
+
+    /* Only claim a share of what is left, so the maze floats on a margin
+     * instead of crowding the edges.  --fill=100 restores the old
+     * edge-to-edge layout.  An explicit --size always wins. */
+    fill = o->fill;
+    if (fill < 1)   fill = 1;
+    if (fill > 100) fill = 100;
+    tc = tc * fill / 100;
+    tr = tr * fill / 100;
+    if (tc < 1) tc = 1;
+    if (tr < 1) tr = 1;
 
     c = (o->size_w > 0) ? o->size_w : (tc - ww) / (cc + ww);
     r = (o->size_h > 0) ? o->size_h : (tr - ww) / (cc + ww);

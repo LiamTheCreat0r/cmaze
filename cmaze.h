@@ -107,6 +107,7 @@ typedef struct Options {
     const char *theme;
     const char *strategy;
     int    wall_width, corridor, braid;
+    int    fill;                   /* % of the space the maze may claim */
     int    size_w, size_h;         /* -1 => derive from the terminal */
     const char *save;
     const char *load;
@@ -130,7 +131,8 @@ enum {
     X_SIZE     = 1 << 10,
     X_COLORS   = 1 << 11,
     X_MSG      = 1 << 12,
-    X_ENDPOINTS = 1 << 13
+    X_ENDPOINTS = 1 << 13,
+    X_FILL     = 1 << 14
 };
 
 int  options_parse(Options *o, int argc, char **argv);

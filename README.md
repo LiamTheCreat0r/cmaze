@@ -5,17 +5,16 @@ Carve a maze one cell at a time, in color, at whatever speed you like — or pri
 one to a file. Walls default to a seeded ASCII texture:
 
 ```
-+-::~-::::::-::----_-:=:-.--%
-: :         :   :           '
-' ' x.__# % %=% ' x~__-_=~% :
-: :   :   :   : : :   ' :   '
-! #.# ! x==_# % ! x # @ ! x_|
-|   | | |   |   |   |   |   !
-' x ' ' % # %._.% #~__-=.~# :
-| | | |   |   |   |   !   | !
-! #_# x_...=% % #=! x * x x |
-|           |     | |   |   !
-#____=_..____._====~..:._:_=+
+*~:::-:-~::~:-:~~~:.:-.--.-:.-*
+:           :     :           :
+'           '     '           '
+:  +  *~-@  +  @  :.-*  @.:+  :
+!  '     '     '  !     !     !
+|  :     :     :  |     |     |
+'  x..%  #=._._%  %  %-.%  #-.'
+|     |     |        :        |
+!     !     !        '        !
+*:~~:::::--:~---:~~_-~_~~=-~=~@
 ```
 
 ## Features
@@ -73,7 +72,8 @@ appearance
       --theme=THEME       default, forest, ocean, amber or mono
   -c, --colors=LIST       comma list: wall,path,head,trail1,trail2,unvisited,endpoint
   -W, --wall-width=INT    wall thickness in characters (default 1)
-  -C, --corridor=INT      corridor width in characters (default 1)
+  -C, --corridor=INT      corridor width in characters (default 2)
+      --fill=PCT          share of the terminal the maze may use (default 67)
       --size=WxH          fixed maze size in cells
   -m, --message=STR       show a message below the maze, like cbonsai
   -e, --endpoints         mark an entrance and exit
