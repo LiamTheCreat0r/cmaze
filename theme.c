@@ -206,7 +206,7 @@ struct themeent { const char *name; short c[CR_COUNT]; };
 
 /* wall, path, head, trail1, trail2, unvisited, endpoint */
 static const struct themeent themes[] = {
-    { "default", {  63, 251,  51,  50,  44, 238, 226 } },
+    { "default", {  27, 251,  51,  50,  44, 238, 226 } },
     { "forest",  {  29, 108, 118,  78,  43,  22, 226 } },
     { "ocean",   {  33, 109, 123,  45,  38,  17, 122 } },
     { "amber",   { 166, 143, 226, 214, 172,  58, 231 } },
