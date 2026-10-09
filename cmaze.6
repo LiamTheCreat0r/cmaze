@@ -1,0 +1,146 @@
+.\" cmaze.6 - the cmaze man page
+.TH CMAZE 6 "cmaze 1.1.0" "Games"
+.SH NAME
+cmaze \- a terminal maze generator
+.SH SYNOPSIS
+.B cmaze
+.RI [ options ]
+.SH DESCRIPTION
+.B cmaze
+generates mazes in a terminal, using curses.  It is meant to be watched
+rather than played: mazes can be carved live, one cell at a time, in
+color, or printed to standard output.  Nothing about solving or playing
+a maze is included.
+.PP
+The same seed always produces the same maze, in every view.
+.SH MODES
+.TP
+.BR \-l ", " \-\-live
+Animate the maze being carved.
+.TP
+.BR \-i ", " \-\-infinite
+Keep generating new mazes forever.
+.TP
+.BR \-S ", " \-\-screensaver
+Live + infinite; quits on any keypress.
+.TP
+.BR \-p ", " \-\-print
+Print the finished maze to standard output and exit, without starting
+curses.
+.SH TIMING
+.TP
+.BR \-t ", " \-\-time= TIME
+Seconds between animation steps (default 0.01).
+.TP
+.BR \-w ", " \-\-wait= TIME
+Seconds to pause between mazes (default 1.0).
+.TP
+.BR \-s ", " \-\-seed= INT
+Seed, so the same maze comes back.
+.SH APPEARANCE
+.TP
+.BR \-T ", " \-\-type= TYPE
+Maze algorithm (default backtracker).  One of backtracker, prim,
+kruskal, wilson, aldous-broder, eller, growing-tree, division,
+sidewinder, binary-tree, hunt-and-kill, random.
+.TP
+.BI \-\-style= STYLE
+Wall style for the top view: texture (default), ascii, unicode or block.
+.TP
+.BI \-\-theme= THEME
+Color theme: default, forest, ocean, amber or mono.
+.TP
+.BR \-c ", " \-\-colors= LIST
+Comma list of colors overriding the theme roles, in order:
+wall,path,head,trail1,trail2,unvisited,endpoint.  Colors are names,
+xterm-256 indices or #rrggbb hex.
+.TP
+.BR \-W ", " \-\-wall\-width= INT
+Wall thickness in characters (default 1).
+.TP
+.BR \-C ", " \-\-corridor= INT
+Corridor width in characters (default 2).
+.TP
+.BI \-\-fill= PCT
+Share of the terminal the maze may use (default 67).
+.TP
+.BI \-\-size= WxH
+Fixed maze size in cells.
+.TP
+.BR \-m ", " \-\-message= STR
+Show a message below the maze, like cbonsai.
+.TP
+.BR \-e ", " \-\-endpoints
+Mark an entrance and an exit.
+.SH VIEWS
+.TP
+.BR \-V ", " \-\-view= VIEW
+How the maze is drawn: top (the default flat plan), iso (2:1 dimetric
+isometric) or oblique (front-facing with a diagonal depth offset).  The
+isometric views use a parallel projection: walls become blocks with a
+top face and two side faces, drawn back to front so nearer walls hide
+what is behind them.  Mazes are auto-sized to fit the terminal.
+.TP
+.BR \-H ", " \-\-wall\-height= INT
+Wall height in rows for the iso and oblique views (default 2).  Taller
+walls look more 3D but hide more of the floor; 1 is the most readable.
+.TP
+.BR \-R ", " \-\-rotate= INT
+Which corner of the maze faces the viewer: 0, 1, 2 or 3 (90 degree
+steps, default 0).
+.TP
+.BI \-\-shade= BOOL
+Shade the three wall faces differently (top lightest, left medium,
+right darkest), using the theme's wall color.  Default on.
+.B \-\-no\-shade
+is equivalent to \-\-shade=no.
+.TP
+.B \-\-no\-floor
+Do not draw floor tiles in the iso/oblique views, only walls.
+.TP
+.BI \-\-iso\-style= STYLE
+Glyph set for the iso/oblique views: ascii (/ \\ _ |), box (box drawing
+and diagonals) or block (solid blocks of different density).  The curses
+view defaults to box on UTF-8 terminals; printed output always defaults
+to plain ascii.
+.SH TWEAKS
+.TP
+.BR \-b ", " \-\-braid= INT
+Percentage of dead ends to remove (0-100).
+.TP
+.BI \-\-strategy= STRAT
+Growing tree strategy: newest, oldest, random or mix.
+.SH FILES
+.TP
+.BR \-f ", " \-\-save= FILE
+Save the seed and settings to FILE.
+.TP
+.BR \-L ", " \-\-load= FILE
+Load a saved maze configuration; command line flags still win.
+.SH OTHER OPTIONS
+.TP
+.BR \-v ", " \-\-version
+Print the version and exit.
+.TP
+.BR \-h ", " \-\-help
+Print the help text and exit.
+.SH KEYS
+.B q
+,
+.B ESC
+and
+.B Ctrl-C
+quit; in screensaver mode any key quits.  The terminal is restored
+cleanly on exit.
+.SH EXAMPLES
+.PP
+.nf
+cmaze \-l                         # watch a maze carve itself
+cmaze \-l \-T wilson \-\-theme=ocean
+cmaze \-l \-S                      # screensaver
+cmaze \-p \-\-size=40x20 > maze.txt
+cmaze \-V iso \-l \-H 3             # isometric view, taller walls
+cmaze \-p \-V iso \-R 1 > maze.txt  # rotated isometric maze, printed
+.fi
+.SH SEE ALSO
+The cmaze README, shipped with the source.

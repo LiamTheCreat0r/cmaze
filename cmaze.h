@@ -20,7 +20,7 @@
 #include <string.h>
 #include <wchar.h>
 
-#define CMAZE_VERSION "1.0.0"
+#define CMAZE_VERSION "1.1.0"
 
 /* ------------------------------------------------------------------ *
  * Directions and walls
@@ -72,6 +72,9 @@ void  maze_wall(Maze *m, int r, int c, int dir);
 void  maze_mark(Maze *m, int r, int c);
 void  maze_braid(Maze *m, int pct, Rng *rng);
 void  maze_endpoints(Maze *m, Rng *rng);
+/* Colour role of a cell: CR_UNVIS, CR_HEAD, CR_TRAIL*, CR_PATH or
+ * CR_ENDPOINT, following the generator head and its fading trail.      */
+int   maze_cell_role(const Maze *m, int r, int c);
 
 static inline int maze_in(const Maze *m, int r, int c)
 {
@@ -109,12 +112,23 @@ typedef struct Options {
     int    wall_width, corridor, braid;
     int    fill;                   /* % of the space the maze may claim */
     int    size_w, size_h;         /* -1 => derive from the terminal */
+    const char *view;              /* top | iso | oblique (as typed)      */
+    const char *iso_style_arg;     /* ascii | box | block                 */
+    int    wall_height;            /* -H, wall height in rows             */
+    int    rotate;                 /* -R, 0..3, 90 degree steps           */
+    int    shade;                  /* shade the three wall faces          */
+    int    floor;                  /* 0 => --no-floor                     */
     const char *save;
     const char *load;
     int    help, version;
-    int    style;                  /* resolved STYLE_* */
+    int    style;                  /* resolved STYLE_*  */
+    int    view_mode;              /* resolved VIEW_*   */
+    int    iso_style;              /* resolved ISO_*    */
     int    explicit_mask;          /* which flags the user really typed */
 } Options;
+
+enum { VIEW_TOP = 0, VIEW_ISO, VIEW_OBLIQUE };
+enum { ISO_AUTO = 0, ISO_ASCII, ISO_BOX, ISO_BLOCK };
 
 /* Bits used to merge a --load file with the command line. */
 enum {
@@ -132,7 +146,13 @@ enum {
     X_COLORS   = 1 << 11,
     X_MSG      = 1 << 12,
     X_ENDPOINTS = 1 << 13,
-    X_FILL     = 1 << 14
+    X_FILL     = 1 << 14,
+    X_VIEW     = 1 << 15,
+    X_WALLH    = 1 << 16,
+    X_ROTATE   = 1 << 17,
+    X_SHADE    = 1 << 18,
+    X_NOFLOOR  = 1 << 19,
+    X_ISOSTYLE = 1 << 20
 };
 
 int  options_parse(Options *o, int argc, char **argv);
@@ -176,6 +196,10 @@ enum {
     CR_TRAIL2,
     CR_UNVIS,
     CR_ENDPOINT,
+    CR_WTOP,        /* isometric wall faces: top, left, right */
+    CR_WLEFT,
+    CR_WRIGHT,
+    CR_BG,          /* untouched canvas background            */
     CR_COUNT
 };
 
@@ -192,12 +216,16 @@ typedef struct Render {
     unsigned int tex_seed;        /* per-maze seed for the wall texture      */
     short pair[CR_COUNT];         /* ncurses colour pair, 0 when disabled    */
     short col[CR_COUNT];          /* resolved colour numbers                 */
+    short spair[CR_COUNT];        /* pairs whose fg == bg, for solid fills   */
 } Render;
 
 int   color_parse(const char *s);       /* -> 0..255, or -1 on error        */
 short color_nearest(int c);             /* -> best available colour         */
+short color_shade(int c, double k);     /* scale RGB of an xterm colour     */
 int   theme_lookup(const char *name, short out[CR_COUNT]);
 int   style_parse(const char *name);    /* -> STYLE_*                       */
+int   view_parse(const char *name);     /* -> VIEW_*                        */
+int   iso_style_parse(const char *name);/* -> ISO_*                         */
 void  render_setup(Render *R, const Options *o);
 
 /* ------------------------------------------------------------------ *
@@ -209,6 +237,7 @@ typedef struct Layout {
     int cw, ch;         /* rendered size in characters                   */
     int oy, ox;         /* top-left corner of the maze on screen         */
     int tr, tc;         /* terminal size used for centring               */
+    int view;           /* VIEW_* actually drawn (iso falls back to top) */
     int msg_y, msg_x;   /* message box position, 0 size when there is none */
     int msg_w, msg_h;
 } Layout;
@@ -235,6 +264,52 @@ void render_screen(const Maze *m, const Options *o, const Render *R,
                    const Layout *L);
 void render_message(const Options *o, const Render *R, const Layout *L);
 void render_print(const Maze *m, const Options *o, FILE *fp);
+
+/* ------------------------------------------------------------------ *
+ * Off-screen canvas (canvas.c)
+ * ------------------------------------------------------------------ */
+
+typedef struct Canvas {
+    wchar_t       *ch;      /* w*h characters                             */
+    unsigned char *role;    /* w*h colour roles, CR_WALL marks wall cells */
+    int            w, h;
+} Canvas;
+
+int  canvas_alloc(Canvas *cv, int w, int h);
+void canvas_free(Canvas *cv);
+void canvas_paint(Canvas *cv, int x, int y, int w, int h,
+                  wchar_t ch, unsigned char role);
+void canvas_put(Canvas *cv, int x, int y, wchar_t ch, unsigned char role);
+void canvas_put_cell(int y, int x, wchar_t ch, short pair, int use_color);
+void canvas_fput_wc(wchar_t wc, FILE *fp);
+
+/* ------------------------------------------------------------------ *
+ * Tile grid + projection (project.c)
+ * ------------------------------------------------------------------ */
+
+/* The maze expanded to one tile per wall segment and passage: a
+ * (2*cols+1) x (2*rows+1) grid where odd/odd tiles are cell interiors. */
+typedef struct Tiles {
+    int            w, h;
+    unsigned char *wall;   /* 1 => wall block, 0 => floor                */
+    unsigned char *role;   /* colour role for floor tiles                */
+} Tiles;
+
+int  tiles_build(const Maze *m, Tiles *t);
+void tiles_free(Tiles *t);
+/* Rotate (x, y) in a tw x th grid: rot 0..3, 90 degree steps.          */
+void grid_rotate(int rot, int tw, int th, int x, int y, int *rx, int *ry);
+
+/* ------------------------------------------------------------------ *
+ * Isometric / oblique renderer (render_iso.c)
+ * ------------------------------------------------------------------ */
+
+/* Size in characters of the projected maze, used for layout.           */
+void iso_size(const Options *o, int rows, int cols, int *w, int *h);
+void iso_build(Canvas *cv, const Maze *m, const Options *o, const Render *R);
+void oblique_size(const Options *o, int rows, int cols, int *w, int *h);
+void oblique_build(Canvas *cv, const Maze *m, const Options *o,
+                   const Render *R);
 
 /* Locale + style detection, called once at start-up.  Returns 1 when the
  * locale can carry UTF-8.                                               */

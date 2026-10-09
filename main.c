@@ -466,6 +466,19 @@ int main(int argc, char **argv)
         o.style = STYLE_TEXTURE;
     }
 
+    o.view_mode = view_parse(o.view);
+    if (o.view_mode < 0)
+        o.view_mode = VIEW_TOP;
+    o.iso_style = iso_style_parse(o.iso_style_arg);
+    if (o.iso_style == ISO_AUTO) {
+        /* The curses view may use box drawing; printed output stays
+         * plain ASCII so it can be pasted anywhere. */
+        o.iso_style = o.print ? ISO_ASCII : (utf8 ? ISO_BOX : ISO_ASCII);
+    } else if (!utf8 && (o.iso_style == ISO_BOX || o.iso_style == ISO_BLOCK)) {
+        fprintf(stderr, "cmaze: no UTF-8 locale, falling back to ascii glyphs\n");
+        o.iso_style = ISO_ASCII;
+    }
+
     if (o.print)
         return run_print(&o);
     return run_curses(&o);

@@ -96,6 +96,24 @@ short color_nearest(int c)
     return (short)best;
 }
 
+/* Lighten (k > 1) or darken (k < 1) an xterm colour, for the wall face
+ * shades of the isometric views. */
+short color_shade(int c, double k)
+{
+    int r, g, b;
+
+    if (c < 0)
+        return -1;
+    xterm_rgb(c > 255 ? 255 : c, &r, &g, &b);
+    r = (int)(r * k + 0.5);
+    g = (int)(g * k + 0.5);
+    b = (int)(b * k + 0.5);
+    if (r > 255) r = 255;
+    if (g > 255) g = 255;
+    if (b > 255) b = 255;
+    return (short)nearest_rgb(r, g, b);
+}
+
 /* ------------------------------------------------------------------ */
 
 struct nameent { const char *name; int idx; };
@@ -204,13 +222,14 @@ int color_parse(const char *s)
 
 struct themeent { const char *name; short c[CR_COUNT]; };
 
-/* wall, path, head, trail1, trail2, unvisited, endpoint */
+/* wall, path, head, trail1, trail2, unvisited, endpoint,
+ * wall-top, wall-left, wall-right (the isometric face shades) */
 static const struct themeent themes[] = {
-    { "default", {  27, 251,  51,  50,  44, 238, 226 } },
-    { "forest",  {  29, 108, 118,  78,  43,  22, 226 } },
-    { "ocean",   {  33, 109, 123,  45,  38,  17, 122 } },
-    { "amber",   { 166, 143, 226, 214, 172,  58, 231 } },
-    { "mono",    { 245, 242, 255, 251, 248, 236, 231 } }
+    { "default", {  27, 251,  51,  50,  44, 238, 226,  39,  27,  18, 0 } },
+    { "forest",  {  29, 108, 118,  78,  43,  22, 226,  35,  29,  23, 0 } },
+    { "ocean",   {  33, 109, 123,  45,  38,  17, 122,  45,  33,  24, 0 } },
+    { "amber",   { 166, 143, 226, 214, 172,  58, 231, 215, 166, 130, 0 } },
+    { "mono",    { 245, 242, 255, 251, 248, 236, 231, 253, 245, 238, 0 } }
 };
 
 int theme_lookup(const char *name, short out[CR_COUNT])
@@ -251,6 +270,39 @@ int style_parse(const char *name)
     if (strcmp(norm, "utf8") == 0)    return STYLE_UNICODE;
     if (strcmp(norm, "block") == 0)   return STYLE_BLOCK;
     if (strcmp(norm, "solid") == 0)   return STYLE_BLOCK;
+    return -1;
+}
+
+int view_parse(const char *name)
+{
+    char norm[64];
+
+    if (!name || !*name)
+        return VIEW_TOP;
+    normalize(name, norm, sizeof norm);
+
+    if (strcmp(norm, "top") == 0)      return VIEW_TOP;
+    if (strcmp(norm, "down") == 0)     return VIEW_TOP;
+    if (strcmp(norm, "iso") == 0)      return VIEW_ISO;
+    if (strcmp(norm, "isometric") == 0)return VIEW_ISO;
+    if (strcmp(norm, "oblique") == 0)  return VIEW_OBLIQUE;
+    return -1;
+}
+
+int iso_style_parse(const char *name)
+{
+    char norm[64];
+
+    if (!name || !*name)
+        return ISO_AUTO;
+    normalize(name, norm, sizeof norm);
+
+    if (strcmp(norm, "auto") == 0)   return ISO_AUTO;
+    if (strcmp(norm, "ascii") == 0)  return ISO_ASCII;
+    if (strcmp(norm, "box") == 0)    return ISO_BOX;
+    if (strcmp(norm, "unicode") == 0)return ISO_BOX;
+    if (strcmp(norm, "block") == 0)  return ISO_BLOCK;
+    if (strcmp(norm, "solid") == 0)  return ISO_BLOCK;
     return -1;
 }
 
@@ -315,6 +367,16 @@ void render_setup(Render *R, const Options *o)
             tok = comma ? comma + 1 : NULL;
         }
         free(dup);
+
+        /* A custom wall colour brings its own face shades. */
+        {
+            int v = color_parse(o->colors);      /* first field again */
+            if (v >= 0) {
+                cols[CR_WTOP]   = color_shade((short)v, 1.45);
+                cols[CR_WLEFT]  = (short)v;
+                cols[CR_WRIGHT] = color_shade((short)v, 0.6);
+            }
+        }
     }
 
     if (!R->use_color)
@@ -325,5 +387,14 @@ void render_setup(Render *R, const Options *o)
         R->pair[i] = (short)(i + 1);
         if (init_pair(R->pair[i], R->col[i], (short)bg) == ERR)
             R->pair[i] = 0;
+
+        /* Solid-fill pairs (fg == bg) let a space paint a whole face
+         * or floor diamond in the isometric views. */
+        R->spair[i] = 0;
+        if (COLOR_PAIRS > CR_COUNT + 1 + i) {
+            short p = (short)(CR_COUNT + 1 + i);
+            if (init_pair(p, R->col[i], R->col[i]) != ERR)
+                R->spair[i] = p;
+        }
     }
 }

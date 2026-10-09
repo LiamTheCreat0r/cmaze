@@ -11,7 +11,10 @@ enum {
     OPT_THEME,
     OPT_SIZE,
     OPT_STRATEGY,
-    OPT_FILL
+    OPT_FILL,
+    OPT_SHADE,
+    OPT_NOFLOOR,
+    OPT_ISOSTYLE
 };
 
 static const struct option longopts[] = {
@@ -31,6 +34,9 @@ static const struct option longopts[] = {
     { "print",       no_argument,       0, 'p' },
     { "save",        required_argument, 0, 'f' },
     { "load",        required_argument, 0, 'L' },
+    { "view",        required_argument, 0, 'V' },
+    { "wall-height", required_argument, 0, 'H' },
+    { "rotate",      required_argument, 0, 'R' },
     { "version",     no_argument,       0, 'v' },
     { "help",        no_argument,       0, 'h' },
     { "style",       required_argument, 0, OPT_STYLE },
@@ -38,6 +44,10 @@ static const struct option longopts[] = {
     { "size",        required_argument, 0, OPT_SIZE },
     { "strategy",    required_argument, 0, OPT_STRATEGY },
     { "fill",        required_argument, 0, OPT_FILL },
+    { "shade",       required_argument, 0, OPT_SHADE },
+    { "no-shade",    no_argument,       0, OPT_SHADE },
+    { "no-floor",    no_argument,       0, OPT_NOFLOOR },
+    { "iso-style",   required_argument, 0, OPT_ISOSTYLE },
     { 0, 0, 0, 0 }
 };
 
@@ -55,6 +65,11 @@ void options_defaults(Options *o)
     o->size_w       = -1;
     o->size_h       = -1;
     o->style        = STYLE_AUTO;
+    o->view         = "top";
+    o->wall_height  = 2;
+    o->shade        = 1;
+    o->floor        = 1;
+    o->iso_style    = ISO_AUTO;
 }
 
 void options_print_version(void)
@@ -92,6 +107,14 @@ void options_print_help(void)
 "  -m, --message=STR       show a message below the maze, like cbonsai\n"
 "  -e, --endpoints         mark an entrance and exit\n"
 "\n"
+"views\n"
+"  -V, --view=VIEW         top (default), iso or oblique\n"
+"  -H, --wall-height=INT   wall height in rows for iso/oblique (default 2)\n"
+"  -R, --rotate=INT        which corner faces you: 0, 1, 2 or 3 (default 0)\n"
+"      --shade=BOOL        shade wall faces light/medium/dark (default on)\n"
+"      --no-floor          draw only walls, no floor tiles\n"
+"      --iso-style=STYLE   iso glyphs: ascii, box or block (default auto)\n"
+"\n"
 "tweaks\n"
 "  -b, --braid=INT         percentage of dead ends to remove (0-100)\n"
 "      --strategy=STRAT    growing tree: newest, oldest, random or mix\n"
@@ -115,7 +138,9 @@ void options_print_help(void)
 "  cmaze -l -T wilson --theme=ocean\n"
 "  cmaze -l -S                     screensaver\n"
 "  cmaze -p --size=40x20 > maze.txt\n"
-"  cmaze -l -s 42 -b 40 -e -m \"hello\"\n",
+"  cmaze -l -s 42 -b 40 -e -m \"hello\"\n"
+"  cmaze -V iso -l -H 3            isometric view, taller walls\n"
+"  cmaze -p -V iso -R 1 > maze.txt\n",
         CMAZE_VERSION);
 }
 
@@ -140,12 +165,38 @@ static int parse_int(const char *what, const char *arg, long *out)
     return 0;
 }
 
+/* "yes"/"no", "true"/"false", "on"/"off", "1"/"0".  Returns -1 on
+ * garbage.  A bare --no-shade passes NULL for "no". */
+static int parse_bool(const char *arg)
+{
+    char norm[16];
+    size_t k = 0;
+
+    if (!arg)
+        return 0;
+    for (; *arg && k + 1 < sizeof norm; arg++) {
+        char ch = *arg;
+        if (ch >= 'A' && ch <= 'Z')
+            ch = (char)(ch - 'A' + 'a');
+        norm[k++] = ch;
+    }
+    norm[k] = '\0';
+
+    if (!strcmp(norm, "yes") || !strcmp(norm, "true") ||
+        !strcmp(norm, "on") || !strcmp(norm, "1"))
+        return 1;
+    if (!strcmp(norm, "no") || !strcmp(norm, "false") ||
+        !strcmp(norm, "off") || !strcmp(norm, "0"))
+        return 0;
+    return -1;
+}
+
 int options_parse(Options *o, int argc, char **argv)
 {
     int ch;
 
     opterr = 0;
-    while ((ch = getopt_long(argc, argv, "lit:w:ST:s:m:c:W:C:b:epf:L:vh",
+    while ((ch = getopt_long(argc, argv, "lit:w:ST:s:m:c:W:C:b:epf:L:V:H:R:vh",
                              longopts, NULL)) != -1) {
         switch (ch) {
         case 'l': o->live = 1; break;
@@ -218,6 +269,50 @@ int options_parse(Options *o, int argc, char **argv)
         }
         case 'f': o->save = optarg; break;
         case 'L': o->load = optarg; break;
+
+        case 'V':
+            if (view_parse(optarg) < 0)
+                return bad("unknown view: %s (try top, iso, oblique)", optarg);
+            o->view = optarg;
+            o->explicit_mask |= X_VIEW;
+            break;
+        case 'H': {
+            long v;
+            if (parse_int("wall height", optarg, &v)) return -1;
+            if (v < 1) return bad("wall height must be >= 1: %s", optarg);
+            if (v > 100) return bad("wall height must be <= 100: %s", optarg);
+            o->wall_height = (int)v;
+            o->explicit_mask |= X_WALLH;
+            break;
+        }
+        case 'R': {
+            long v;
+            if (parse_int("rotate", optarg, &v)) return -1;
+            if (v < 0 || v > 3) return bad("rotate must be 0-3: %s", optarg);
+            o->rotate = (int)v;
+            o->explicit_mask |= X_ROTATE;
+            break;
+        }
+        case OPT_SHADE: {
+            /* --no-shade arrives here without an argument. */
+            int v = optarg ? parse_bool(optarg) : 0;
+            if (v < 0)
+                return bad("shade needs yes or no: %s", optarg);
+            o->shade = v;
+            o->explicit_mask |= X_SHADE;
+            break;
+        }
+        case OPT_NOFLOOR:
+            o->floor = 0;
+            o->explicit_mask |= X_NOFLOOR;
+            break;
+        case OPT_ISOSTYLE:
+            if (iso_style_parse(optarg) < 0)
+                return bad("unknown iso style: %s (try ascii, box, block)",
+                           optarg);
+            o->iso_style_arg = optarg;
+            o->explicit_mask |= X_ISOSTYLE;
+            break;
 
         case OPT_STYLE:
             if (style_parse(optarg) < 0)
@@ -373,6 +468,26 @@ static void load_kv(Options *o, const char *key, const char *val)
         if (!(ex & X_MSG) && *val) o->message = keep(val);
     } else if (!strcmp(key, "endpoints")) {
         if (!(ex & X_ENDPOINTS)) o->endpoints = atoi(val);
+    } else if (!strcmp(key, "view")) {
+        if (!(ex & X_VIEW) && view_parse(val) >= 0)
+            o->view = keep(val);
+    } else if (!strcmp(key, "wall-height")) {
+        if (!(ex & X_WALLH)) {
+            long v = strtol(val, NULL, 0);
+            if (v >= 1 && v <= 100) o->wall_height = (int)v;
+        }
+    } else if (!strcmp(key, "rotate")) {
+        if (!(ex & X_ROTATE)) {
+            long v = strtol(val, NULL, 0);
+            if (v >= 0 && v <= 3) o->rotate = (int)v;
+        }
+    } else if (!strcmp(key, "shade")) {
+        if (!(ex & X_SHADE)) o->shade = atoi(val) ? 1 : 0;
+    } else if (!strcmp(key, "floor")) {
+        if (!(ex & X_NOFLOOR)) o->floor = atoi(val) ? 1 : 0;
+    } else if (!strcmp(key, "iso-style")) {
+        if (!(ex & X_ISOSTYLE) && iso_style_parse(val) >= 0)
+            o->iso_style_arg = keep(val);
     }
 }
 
@@ -423,6 +538,13 @@ int options_save(const Options *o, const char *path, unsigned long long seed)
     fprintf(fp, "colors=%s\n", o->colors ? o->colors : "");
     fprintf(fp, "message=%s\n", o->message ? o->message : "");
     fprintf(fp, "endpoints=%d\n", o->endpoints);
+    fprintf(fp, "view=%s\n", o->view ? o->view : "top");
+    fprintf(fp, "wall-height=%d\n", o->wall_height);
+    fprintf(fp, "rotate=%d\n", o->rotate);
+    fprintf(fp, "shade=%d\n", o->shade);
+    fprintf(fp, "floor=%d\n", o->floor);
+    fprintf(fp, "iso-style=%s\n",
+            o->iso_style_arg ? o->iso_style_arg : "auto");
 
     fclose(fp);
     return 0;

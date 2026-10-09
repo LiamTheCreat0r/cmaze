@@ -2,24 +2,41 @@
 
 A terminal maze generator in C + ncurses, meant to be watched rather than played.
 Carve a maze one cell at a time, in color, at whatever speed you like — or print
-one to a file. Walls default to a seeded ASCII texture:
+one to a file. Walls default to a seeded ASCII texture, and the same maze can be
+drawn top-down, isometric, or oblique:
 
 ```
-*~:::-:-~::~:-:~~~:.:-.--.-:.-*
-:           :     :           :
-'           '     '           '
-:  +  *~-@  +  @  :.-*  @.:+  :
-!  '     '     '  !     !     !
-|  :     :     :  |     |     |
-'  x..%  #=._._%  %  %-.%  #-.'
-|     |     |        :        |
-!     !     !        '        !
-*:~~:::::--:~---:~~_-~_~~=-~=~@
+                     __
+                   ______
+                 ____\/____
+               ____\.||:/____
+             ____\.|.__:|:/____
+           ____\.|.______:|:/____
+         ____\.|.____\/____:|:/____
+       ____\.|.____\.||:/____:|:/____
+     ____\.|.____\.|.__:|:/____:|:/____
+   ______|. /____|.____\ :|____\ :|:/____
+ ____\/____ |:/______\.| ____\.| __:|:/____
+/____||:/__\ :|____\.|.______|. /____:|____\
+|:/____:|:.| ____\.|.____\/____ |:/______\.|
+|:|:/____:. /__\.|.____\.||____\ :|____\.|.|
+  |:|:/____ |:.|.____\.|.____\.| ____\.|.|
+    |:|:/____:.____\.|.____\.|.____\.|.|
+      |:|:/______\.|.____\.|.____\.|.|
+        |:|:/____|. /__\.|.____\.|.|
+          |:|:/____ |:.|.____\.|.|
+            |:|:/____:.____\.|.|
+              |:|:/______\.|.|
+                |:|:/__\.|.|
+                  |:|:.|.|
+                    |:.|
 ```
 
 ## Features
 
 - **11 maze algorithms**, plus `random` to pick one per maze
+- **Three views** — top-down (default), isometric (`-V iso`) and oblique
+  (`-V oblique`); the same seed draws the same maze in every view
 - **Textured walls (default)** — walls composed of seeded ASCII symbols,
   grouped by stroke direction, so the maze reads clearly but looks hand-typed
 - **Three more wall styles** — plain ASCII, Unicode box-drawing, or solid blocks
@@ -82,6 +99,14 @@ tweaks
   -b, --braid=INT         percentage of dead ends to remove (0-100)
       --strategy=STRAT    growing tree: newest, oldest, random or mix
 
+views
+  -V, --view=VIEW         top (default), iso or oblique
+  -H, --wall-height=INT   wall height in rows for iso/oblique (default 2)
+  -R, --rotate=INT        which corner faces you: 0, 1, 2 or 3 (default 0)
+      --shade=BOOL        shade wall faces light/medium/dark (default on)
+      --no-floor          draw only walls, no floor tiles
+      --iso-style=STYLE   iso glyphs: ascii, box or block (default auto)
+
 files
   -f, --save=FILE         save the seed and settings to FILE
   -L, --load=FILE         load a saved maze configuration
@@ -107,6 +132,8 @@ cmaze -l -S                       # screensaver
 cmaze -l -i -w 2                  # new maze every 2 seconds, forever
 cmaze -p --size=40x20 > maze.txt  # print a maze to a file
 cmaze -l -s 42 -b 40 -e -m "hello" # seeded, braided, with endpoints + message
+cmaze -V iso -l -H 3              # isometric view with taller walls
+cmaze -p -V iso -R 1 -s 42        # same maze as above, rotated, printed
 ```
 
 ## Maze types
@@ -143,6 +170,37 @@ cmaze -l --style=block      # chunky block walls
 The texture is deterministic: the same `--seed` always produces the same
 glyphs, and each maze in infinite mode gets its own texture.
 
+## Views
+
+`-V` picks how the maze is drawn. Nothing about generation changes — the
+same seed always produces the same maze, whatever the view.
+
+| View | Look |
+| --- | --- |
+| `top` (default) | the classic flat plan |
+| `iso` | 2:1 dimetric isometric; walls become blocks with a top and two side faces |
+| `oblique` | front-facing with a diagonal depth offset; a cheaper, simpler 3D look |
+
+The isometric view is a parallel projection (no perspective), approximated
+with the classic 2:1 pixel-art slope so it lands cleanly on a character grid.
+Tiles are drawn back to front, so walls in front hide what is behind them.
+Mazes are auto-sized to fit the terminal and centered; live carving looks
+like corridors being dug out of a solid block.
+
+```sh
+cmaze -V iso -l              # watch it carve in 3D
+cmaze -V iso -H 3 -R 1       # taller walls, rotated 90 degrees
+cmaze -V oblique -l          # simpler oblique blocks
+cmaze -p -V iso > maze.txt   # print the isometric maze (plain ASCII)
+```
+
+`--iso-style` chooses the glyph set: `ascii` (`/ \ _ |`), `box` (box drawing
+and diagonals) or `block` (`█▓▒░`). The curses view defaults to `box` on a
+UTF-8 terminal, printed output always defaults to `ascii`. Wall faces are
+shaded via the theme's wall colour (top lightest, left medium, right
+darkest); `--no-shade` turns that off, and 8/16-color terminals fall back
+to denser glyphs instead of colors.
+
 ## Colors
 
 A theme sets the whole palette; `-c` overrides individual roles:
@@ -168,6 +226,9 @@ size=40x20
 theme=default
 braid=40
 endpoints=1
+view=iso
+wall-height=3
+rotate=1
 ```
 
 ## Project layout
@@ -178,7 +239,10 @@ main.c         CLI parsing glue, curses setup, main loop, signals
 options.c      getopt_long, help/version, save/load file format
 grid.c         grid + wall bookkeeping, braiding, endpoints
 algo.c         algorithm registry
-render.c       canvas build, box-drawing, message box, print mode
+canvas.c       off-screen character/colour buffer, curses + stdout output
+project.c      maze -> tile grid expansion, rotation math
+render.c       top-down canvas build, message box, print mode, layout
+render_iso.c   isometric + oblique renderers (projection, faces, shading)
 theme.c        color names, xterm-256 mapping, themes
 rng.c          splitmix64/xoshiro-style PRNG
 algos/         the 11 algorithms, one file each

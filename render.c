@@ -1,20 +1,15 @@
 /*
  * render.c - turning a grid of walls into characters, colours and
  * screen output.  The same canvas builder drives the curses view and
- * the plain `cmaze -p` dump.
+ * the plain `cmaze -p` dump.  The isometric and oblique views live in
+ * render_iso.c; this file picks a renderer based on --view.
  */
 
 #include "cmaze.h"
 
 /* ------------------------------------------------------------------ *
- * Canvas
+ * Wall strokes (top view)
  * ------------------------------------------------------------------ */
-
-typedef struct {
-    wchar_t       *ch;      /* w*h characters                             */
-    unsigned char *role;    /* w*h colour roles, CR_WALL marks wall cells */
-    int            w, h;
-} Canvas;
 
 static const wchar_t BOX_LINE[16] = {
     L'\u2500',  /* 0000 isolated */
@@ -34,77 +29,6 @@ static const wchar_t BOX_LINE[16] = {
     L'\u252C',  /* 1110 SEW      */
     L'\u253C'   /* 1111 NSEW     */
 };
-
-static int canvas_alloc(Canvas *cv, int w, int h)
-{
-    if (w < 1) w = 1;
-    if (h < 1) h = 1;
-    cv->w = w;
-    cv->h = h;
-    cv->ch   = malloc(sizeof(wchar_t) * (size_t)w * (size_t)h);
-    cv->role = malloc((size_t)w * (size_t)h);
-    if (!cv->ch || !cv->role) {
-        free(cv->ch);
-        free(cv->role);
-        cv->ch = NULL;
-        cv->role = NULL;
-        return 0;
-    }
-    return 1;
-}
-
-static void canvas_free(Canvas *cv)
-{
-    free(cv->ch);
-    free(cv->role);
-    cv->ch = NULL;
-    cv->role = NULL;
-}
-
-static void paint(Canvas *cv, int x, int y, int w, int h,
-                  wchar_t ch, unsigned char role)
-{
-    int i, j;
-
-    if (x < 0) { w += x; x = 0; }
-    if (y < 0) { h += y; y = 0; }
-    if (x + w > cv->w) w = cv->w - x;
-    if (y + h > cv->h) h = cv->h - y;
-    if (w <= 0 || h <= 0)
-        return;
-
-    for (j = 0; j < h; j++) {
-        size_t base = (size_t)(y + j) * (size_t)cv->w + (size_t)x;
-        for (i = 0; i < w; i++) {
-            cv->ch[base + i] = ch;
-            cv->role[base + i] = role;
-        }
-    }
-}
-
-static int cell_role(const Maze *m, int r, int c)
-{
-    int i = maze_idx(m, r, c);
-    int role, age;
-
-    if (!m->vis[i]) {
-        role = CR_UNVIS;
-    } else if (r == m->head_r && c == m->head_c) {
-        role = CR_HEAD;
-    } else {
-        age = (int)m->tick - m->stamp[i];
-        if (age >= 0 && age < CMAZE_TRAIL_1)
-            role = CR_TRAIL1;
-        else if (age >= 0 && age < CMAZE_TRAIL_2)
-            role = CR_TRAIL2;
-        else
-            role = CR_PATH;
-    }
-
-    if ((r == m->ep1_r && c == m->ep1_c) || (r == m->ep2_r && c == m->ep2_c))
-        role = CR_ENDPOINT;
-    return role;
-}
 
 static wchar_t path_char(const Render *R, int role)
 {
@@ -223,19 +147,19 @@ static void canvas_build(Canvas *cv, const Maze *m, const Render *R)
                 break;
 
             wl   = m->walls[maze_idx(m, r, c)];
-            role = cell_role(m, r, c);
+            role = maze_cell_role(m, r, c);
             pc   = path_char(R, role);
 
-            paint(cv, x0, y0, cc, cc, pc, (unsigned char)role);
+            canvas_paint(cv, x0, y0, cc, cc, pc, (unsigned char)role);
 
             if (!(wl & WALL_BIT(DIR_N)))
-                paint(cv, x0, y0 - ww, cc, ww, pc, (unsigned char)role);
+                canvas_paint(cv, x0, y0 - ww, cc, ww, pc, (unsigned char)role);
             if (!(wl & WALL_BIT(DIR_S)))
-                paint(cv, x0, y0 + cc, cc, ww, pc, (unsigned char)role);
+                canvas_paint(cv, x0, y0 + cc, cc, ww, pc, (unsigned char)role);
             if (!(wl & WALL_BIT(DIR_W)))
-                paint(cv, x0 - ww, y0, ww, cc, pc, (unsigned char)role);
+                canvas_paint(cv, x0 - ww, y0, ww, cc, pc, (unsigned char)role);
             if (!(wl & WALL_BIT(DIR_E)))
-                paint(cv, x0 + cc, y0, ww, cc, pc, (unsigned char)role);
+                canvas_paint(cv, x0 + cc, y0, ww, cc, pc, (unsigned char)role);
         }
     }
 
@@ -257,57 +181,75 @@ static void canvas_build(Canvas *cv, const Maze *m, const Render *R)
 
 static void put_cell(int y, int x, wchar_t ch, short pair, int use_color)
 {
-    wchar_t tmp[2];
-    cchar_t cc;
-
-    if (y < 0 || y >= LINES || x < 0 || x >= COLS)
-        return;
-    tmp[0] = ch;
-    tmp[1] = L'\0';
-    if (setcchar(&cc, tmp, A_NORMAL, use_color ? pair : 0, NULL) == OK)
-        mvadd_wch(y, x, &cc);
+    canvas_put_cell(y, x, ch, pair, use_color);
 }
 
-void render_screen(const Maze *m, const Options *o, const Render *R,
-                   const Layout *L)
+/* Blit a finished canvas onto the screen at the layout origin.  The
+ * bottom band belongs to the message box; never draw into it.  Clip
+ * against both the layout and the *actual* screen, so a stale layout
+ * after a resize can never write past the edge and make the terminal
+ * wrap lines.  `solid` selects the same-foreground/background pairs
+ * the iso views use for filled faces. */
+static void canvas_blit(const Canvas *cv, const Render *R, const Layout *L,
+                        int solid)
 {
-    Canvas cv;
-    int y, x;
+    int scr_h, scr_w, y, x;
+    int lim;
 
-    (void)o;
-    if (!canvas_alloc(&cv, L->cw, L->ch))
-        return;
-    canvas_build(&cv, m, R);
-
-    /* The bottom band belongs to the message box; never draw into it.
-     * Clip against both the layout and the *actual* screen, so a stale
-     * layout after a resize can never write past the edge and make the
-     * terminal wrap lines. */
-    int scr_h, scr_w;
     getmaxyx(stdscr, scr_h, scr_w);
-    int lim = L->tr - L->msg_h;
+    lim = L->tr - L->msg_h;
     if (lim > scr_h)
         lim = scr_h;
 
-    for (y = 0; y < cv.h; y++) {
+    for (y = 0; y < cv->h; y++) {
         int sy = L->oy + y;
         if (sy >= lim)
             break;
         if (sy < 0)
             continue;
-        for (x = 0; x < cv.w; x++) {
+        for (x = 0; x < cv->w; x++) {
             int sx = L->ox + x;
             size_t idx;
+            short pair;
 
             if (sx >= L->tc || sx >= scr_w)
                 break;
             if (sx < 0)
                 continue;
 
-            idx = (size_t)y * (size_t)cv.w + (size_t)x;
-            put_cell(sy, sx, cv.ch[idx], R->pair[cv.role[idx]], R->use_color);
+            idx = (size_t)y * (size_t)cv->w + (size_t)x;
+            if (solid && COLORS >= 16)
+                pair = (cv->role[idx] == CR_BG) ? 0 : R->spair[cv->role[idx]];
+            else
+                pair = R->pair[cv->role[idx]];
+            put_cell(sy, sx, cv->ch[idx], pair, R->use_color);
         }
     }
+}
+
+void render_screen(const Maze *m, const Options *o, const Render *R,
+                   const Layout *L)
+{
+    Canvas cv;
+
+    if (!canvas_alloc(&cv, L->cw, L->ch))
+        return;
+
+    switch (L->view) {
+    case VIEW_ISO:
+        iso_build(&cv, m, o, R);
+        canvas_blit(&cv, R, L, 1);
+        break;
+    case VIEW_OBLIQUE:
+        oblique_build(&cv, m, o, R);
+        canvas_blit(&cv, R, L, 1);
+        break;
+    default:
+        canvas_build(&cv, m, R);
+        canvas_blit(&cv, R, L, 0);
+        break;
+    }
+
     canvas_free(&cv);
 }
 
@@ -499,32 +441,11 @@ void render_message(const Options *o, const Render *R, const Layout *L)
  * Plain stdout output
  * ------------------------------------------------------------------ */
 
-static void fput_wc(wchar_t wc, FILE *fp)
-{
-    unsigned int c = (unsigned int)wc;
-
-    if (c < 0x80) {
-        fputc((int)c, fp);
-    } else if (c < 0x800) {
-        fputc((int)(0xC0 | (c >> 6)), fp);
-        fputc((int)(0x80 | (c & 0x3F)), fp);
-    } else if (c < 0x10000) {
-        fputc((int)(0xE0 | (c >> 12)), fp);
-        fputc((int)(0x80 | ((c >> 6) & 0x3F)), fp);
-        fputc((int)(0x80 | (c & 0x3F)), fp);
-    } else {
-        fputc((int)(0xF0 | (c >> 18)), fp);
-        fputc((int)(0x80 | ((c >> 12) & 0x3F)), fp);
-        fputc((int)(0x80 | ((c >> 6) & 0x3F)), fp);
-        fputc((int)(0x80 | (c & 0x3F)), fp);
-    }
-}
-
 void render_print(const Maze *m, const Options *o, FILE *fp)
 {
     Canvas cv;
     Render R;
-    int y, x;
+    int cw, chh, y, x;
 
     memset(&R, 0, sizeof R);
     R.style      = o->style;
@@ -533,15 +454,27 @@ void render_print(const Maze *m, const Options *o, FILE *fp)
     R.use_color  = 0;
     R.tex_seed   = (unsigned int)o->seed;
 
-    if (!canvas_alloc(&cv,
-                      m->cols * o->corridor + (m->cols + 1) * o->wall_width,
-                      m->rows * o->corridor + (m->rows + 1) * o->wall_width))
+    if (o->view_mode == VIEW_ISO) {
+        iso_size(o, m->rows, m->cols, &cw, &chh);
+    } else if (o->view_mode == VIEW_OBLIQUE) {
+        oblique_size(o, m->rows, m->cols, &cw, &chh);
+    } else {
+        cw = m->cols * o->corridor + (m->cols + 1) * o->wall_width;
+        chh = m->rows * o->corridor + (m->rows + 1) * o->wall_width;
+    }
+
+    if (!canvas_alloc(&cv, cw, chh))
         return;
-    canvas_build(&cv, m, &R);
+
+    switch (o->view_mode) {
+    case VIEW_ISO:      iso_build(&cv, m, o, &R);      break;
+    case VIEW_OBLIQUE:  oblique_build(&cv, m, o, &R);  break;
+    default:            canvas_build(&cv, m, &R);      break;
+    }
 
     for (y = 0; y < cv.h; y++) {
         for (x = 0; x < cv.w; x++)
-            fput_wc(cv.ch[(size_t)y * cv.w + x], fp);
+            canvas_fput_wc(cv.ch[(size_t)y * cv.w + x], fp);
         fputc('\n', fp);
     }
 
@@ -568,7 +501,7 @@ void render_print(const Maze *m, const Options *o, FILE *fp)
                         ch = vert;
                     else if (i - 1 < mb.lens[j - 1])
                         ch = mb.buf[mb.starts[j - 1] + (i - 1)];
-                    fput_wc(ch, fp);
+                    canvas_fput_wc(ch, fp);
                 }
                 fputc('\n', fp);
             }
@@ -581,6 +514,16 @@ void render_print(const Maze *m, const Options *o, FILE *fp)
 /* ------------------------------------------------------------------ *
  * Layout
  * ------------------------------------------------------------------ */
+
+/* Projected size of the maze, when the view is not the top-down one. */
+static int proj_dims(const Options *o, int rows, int cols, int *w, int *h)
+{
+    switch (o->view_mode) {
+    case VIEW_ISO:      iso_size(o, rows, cols, w, h);     return 1;
+    case VIEW_OBLIQUE:  oblique_size(o, rows, cols, w, h); return 1;
+    default:                                          return 0;
+    }
+}
 
 void layout_autosize(const Options *o, int tr, int tc, int *rows, int *cols)
 {
@@ -606,8 +549,30 @@ void layout_autosize(const Options *o, int tr, int tc, int *rows, int *cols)
     if (tc < 1) tc = 1;
     if (tr < 1) tr = 1;
 
+    if (o->view_mode != VIEW_TOP && o->size_w <= 0 && o->size_h <= 0) {
+        /* Projected views: the bounding box grows with the maze, so
+         * find the largest square maze whose projection still fits. */
+        int n = 1;
+        while (n < 512) {
+            proj_dims(o, n + 1, n + 1, &w, &h);
+            if (w > tc || h > tr)
+                break;
+            n++;
+        }
+        *rows = *cols = n;
+        return;
+    }
+
     c = (o->size_w > 0) ? o->size_w : (tc - ww) / (cc + ww);
     r = (o->size_h > 0) ? o->size_h : (tr - ww) / (cc + ww);
+
+    if (o->view_mode != VIEW_TOP) {
+        /* One dimension given: keep the maze square. */
+        if (o->size_w > 0 && o->size_h <= 0)
+            r = c;
+        else if (o->size_h > 0 && o->size_w <= 0)
+            c = r;
+    }
 
     if (c < 1) c = 1;
     if (r < 1) r = 1;
@@ -627,8 +592,7 @@ void layout_place(int rows, int cols, const Options *o, int tr, int tc,
     L->cols = cols;
     L->tr   = tr;
     L->tc   = tc;
-    L->cw   = cols * cc + (cols + 1) * ww;
-    L->ch   = rows * cc + (rows + 1) * ww;
+    L->view = o->view_mode;
 
     /* Reserve a band at the bottom for the message, so the maze and the
      * message never cover each other. */
@@ -642,6 +606,17 @@ void layout_place(int rows, int cols, const Options *o, int tr, int tc,
         }
     } else {
         L->msg_y = L->msg_x = L->msg_w = L->msg_h = 0;
+    }
+
+    if (!proj_dims(o, rows, cols, &L->cw, &L->ch)) {
+        L->cw = cols * cc + (cols + 1) * ww;
+        L->ch = rows * cc + (rows + 1) * ww;
+    } else if ((L->cw > tc || L->ch > tr - band) && rows <= 1 && cols <= 1) {
+        /* Not even a minimal projected maze fits: fall back to the
+         * top view, which is always small enough to try. */
+        L->view = VIEW_TOP;
+        L->cw = cols * cc + (cols + 1) * ww;
+        L->ch = rows * cc + (rows + 1) * ww;
     }
 
     L->ox = (tc - L->cw) / 2;

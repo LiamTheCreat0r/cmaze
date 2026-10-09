@@ -108,6 +108,30 @@ void maze_mark(Maze *m, int r, int c)
     }
 }
 
+int maze_cell_role(const Maze *m, int r, int c)
+{
+    int i = maze_idx(m, r, c);
+    int role, age;
+
+    if (!m->vis[i]) {
+        role = CR_UNVIS;
+    } else if (r == m->head_r && c == m->head_c) {
+        role = CR_HEAD;
+    } else {
+        age = (int)m->tick - m->stamp[i];
+        if (age >= 0 && age < CMAZE_TRAIL_1)
+            role = CR_TRAIL1;
+        else if (age >= 0 && age < CMAZE_TRAIL_2)
+            role = CR_TRAIL2;
+        else
+            role = CR_PATH;
+    }
+
+    if ((r == m->ep1_r && c == m->ep1_c) || (r == m->ep2_r && c == m->ep2_c))
+        role = CR_ENDPOINT;
+    return role;
+}
+
 static int open_count(const Maze *m, int r, int c)
 {
     int d, n = 0;
